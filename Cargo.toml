@@ -1,19 +1,19 @@
 [package]
 name = "serde_yaml"
 version = "0.8.8"
-authors = ["David Tolnay <dtolnay@gmail.com>"]
+authors = ["David Tolnay <dtolnay@gmail.com>", "Jake Schurch <jakeschurch@gmail.com>"]
 license = "MIT/Apache-2.0"
 description = "YAML support for Serde"
 repository = "https://github.com/dtolnay/serde-yaml"
 documentation = "https://docs.rs/serde_yaml/"
 readme = "README.md"
 keywords = ["yaml", "serde"]
+edition = "2018"
 
 [dependencies]
 dtoa = "0.4"
 linked-hash-map = "0.5"
 serde = "1.0.60"
-yaml-rust = "0.4"
 
 [dev-dependencies]
 serde_derive = "1.0"

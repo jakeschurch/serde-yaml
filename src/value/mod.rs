@@ -10,9 +10,8 @@ use std::f64;
 use std::hash::{Hash, Hasher};
 use std::str::FromStr;
 
-use serde::de::{Deserialize, DeserializeOwned};
+use serde::de::Deserialize;
 use serde::Serialize;
-use yaml_rust::Yaml;
 
 use error::Error;
 use mapping::Mapping;
@@ -21,28 +20,34 @@ use ser::Serializer;
 use self::index::Index;
 pub use number::Number;
 
-/// Represents any valid YAML value.
-#[derive(Clone, PartialOrd, Debug)]
-pub enum Value {
-    /// Represents a YAML null value.
-    Null,
-    /// Represents a YAML boolean.
-    Bool(bool),
-    /// Represents a YAML numerical value, whether integer or floating point.
-    Number(Number),
-    /// Represents a YAML string.
-    String(String),
-    /// Represents a YAML sequence in which the elements are
-    /// `serde_yaml::Value`.
-    Sequence(Sequence),
-    /// Represents a YAML mapping in which the keys and values are both
-    /// `serde_yaml::Value`.
-    Mapping(Mapping),
+pub(crate) enum Yaml<'a> {
+    // strings, booleans, numbers, nulls, all treated the same
+    Scalar(&'a str),
+
+    // flow style like `[x, x, x]`
+    // or block style like:
+    //     - x
+    //     - x
+    Sequence(Vec<Yaml<'a>>),
+
+    // flow style like `{x: X, x: X}`
+    // or block style like:
+    //     x: X
+    //     x: X
+    Mapping(Vec<Entry<'a>>),
 }
 
-/// The default value is `Value::Null`.
-///
-/// This is useful for handling omitted `Value` fields when deserializing.
+pub struct Entry<'a> {
+    key: Yaml<'a>,
+    value: Yaml<'a>,
+}
+
+// TODO: Implement
+pub fn parse<'a>(input: &'a str) -> Result<Yaml<'a>, ()> {
+    unimplemented!()
+}
+
+/// This is useful for handling omitted `Yaml` fields when deserializing.
 ///
 /// # Examples
 ///
@@ -52,13 +57,13 @@ pub enum Value {
 /// #
 /// # extern crate serde_yaml;
 /// #
-/// use serde_yaml::Value;
+/// use serde_yaml::Yaml;
 ///
 /// #[derive(Deserialize)]
 /// struct Settings {
 ///     level: i32,
 ///     #[serde(default)]
-///     extras: Value,
+///     extras: Yaml,
 /// }
 ///
 /// # fn try_main() -> Result<(), serde_yaml::Error> {
@@ -66,7 +71,7 @@ pub enum Value {
 /// let s: Settings = serde_yaml::from_str(data)?;
 ///
 /// assert_eq!(s.level, 42);
-/// assert_eq!(s.extras, Value::Null);
+/// assert_eq!(s.extras, Yaml::default());
 /// #
 /// #     Ok(())
 /// # }
@@ -75,37 +80,36 @@ pub enum Value {
 /// #     try_main().unwrap()
 /// # }
 /// ```
-impl Default for Value {
-    fn default() -> Value {
-        Value::Null
+// REVIEW: Is this acceptable as a default?
+impl<'a> Default for Yaml<'a> {
+    fn default() -> Self {
+        Yaml::Scalar(None)
     }
 }
 
-/// A YAML sequence in which the elements are `serde_yaml::Value`.
-pub type Sequence = Vec<Value>;
-
-/// Convert a `T` into `serde_yaml::Value` which is an enum that can represent
+/// Convert a `T` into `serde_yaml::Yaml` which is an enum that can represent
 /// any valid YAML data.
 ///
 /// This conversion can fail if `T`'s implementation of `Serialize` decides to
 /// return an error.
 ///
 /// ```rust
-/// # use serde_yaml::Value;
+/// # use serde_yaml::Yaml;
 /// let val = serde_yaml::to_value("s").unwrap();
-/// assert_eq!(val, Value::String("s".to_owned()));
+/// assert_eq!(val, Yaml::String("s".to_owned()));
 /// ```
-pub fn to_value<T>(value: T) -> Result<Value, Error>
+// REVIEW: Is this needed?
+pub fn to_value<'a, T>(value: T) -> Result<Yaml<'a>, Error>
 where
     T: Serialize,
 {
     value.serialize(Serializer).map(yaml_to_value)
 }
 
-/// Interpret a `serde_yaml::Value` as an instance of type `T`.
+/// Interpret a `serde_yaml::Yaml` as an instance of type `T`.
 ///
-/// This conversion can fail if the structure of the Value does not match the
-/// structure expected by `T`, for example if `T` is a struct type but the Value
+/// This conversion can fail if the structure of the Yaml does not match the
+/// structure expected by `T`, for example if `T` is a struct type but the Yaml
 /// contains something other than a YAML map. It can also fail if the structure
 /// is correct but `T`'s implementation of `Deserialize` decides that something
 /// is wrong with the data, for example required struct fields are missing from
@@ -113,19 +117,19 @@ where
 /// type.
 ///
 /// ```rust
-/// # use serde_yaml::Value;
-/// let val = Value::String("foo".to_owned());
+/// # use serde_yaml::Yaml;
+/// let val = Yaml::String("foo".to_owned());
 /// let s: String = serde_yaml::from_value(val).unwrap();
 /// assert_eq!("foo", s);
 /// ```
-pub fn from_value<T>(value: Value) -> Result<T, Error>
+pub fn from_value<'a, T>(value: Yaml) -> Result<T, Error>
 where
-    T: DeserializeOwned,
+    T: Deserialize<'a>,
 {
     Deserialize::deserialize(value)
 }
 
-impl Value {
+impl<'a> Yaml<'a> {
     /// Index into a YAML sequence or map. A string index can be used to access
     /// a value in a map, and a usize index can be used to access an element of
     /// an sequence.
@@ -137,31 +141,31 @@ impl Value {
     ///
     /// ```rust
     /// # extern crate serde_yaml;
-    /// # use serde_yaml::Value;
+    /// # use serde_yaml::Yaml;
     /// #
-    /// # fn yaml(i: &str) -> serde_yaml::Value { serde_yaml::from_str(i).unwrap() }
+    /// # fn yaml(i: &str) -> serde_yaml::Yaml { serde_yaml::from_str(i).unwrap() }
     /// # fn main() {
-    /// let object: Value = yaml(r#"{ A: 65, B: 66, C: 67 }"#);
+    /// let object: Yaml = yaml(r#"{ A: 65, B: 66, C: 67 }"#);
     /// let x = object.get("A").unwrap();
     /// assert_eq!(x, 65);
     ///
-    /// let sequence: Value = yaml(r#"[ "A", "B", "C" ]"#);
+    /// let sequence: Yaml= yaml(r#"[ "A", "B", "C" ]"#);
     /// let x = sequence.get(2).unwrap();
-    /// assert_eq!(x, &Value::String("C".into()));
+    /// assert_eq!(x, &Yaml::Scalar("C".into()));
     ///
     /// assert_eq!(sequence.get("A"), None);
     /// # }
     /// ```
     ///
     /// Square brackets can also be used to index into a value in a more concise
-    /// way. This returns `Value::Null` in cases where `get` would have returned
+    /// way. This returns `Yaml::Scalar(None)` in cases where `get` would have returned
     /// `None`.
     ///
     /// ```rust
     /// # extern crate serde_yaml;
-    /// # use serde_yaml::Value;
+    /// # use serde_yaml::Yaml;
     /// #
-    /// # fn yaml(i: &str) -> serde_yaml::Value { serde_yaml::from_str(i).unwrap() }
+    /// # fn yaml(i: &str) -> serde_yaml::Yaml{ serde_yaml::from_str(i).unwrap() }
     /// # fn main() {
     /// let object = yaml(r#"
     /// ---
@@ -170,473 +174,475 @@ impl Value {
     /// C: [c, ć, ć̣, ḉ]
     /// 42: true
     /// "#);
-    /// assert_eq!(object["B"][0], Value::String("b".into()));
+    /// assert_eq!(object["B"][0], Yaml::Scalar("b".into()));
     ///
-    /// assert_eq!(object[Value::String("D".into())], Value::Null);
-    /// assert_eq!(object["D"], Value::Null);
-    /// assert_eq!(object[0]["x"]["y"]["z"], Value::Null);
+    /// assert_eq!(object[Yaml::Scalar("D".into())], Yaml::Scalar(None));
+    /// assert_eq!(object["D"], Yaml::Scalar(None));
+    /// assert_eq!(object[0]["x"]["y"]["z"], Yaml::Scalar(None));
     ///
-    /// assert_eq!(object[42], Value::Bool(true));
+    /// assert_eq!(object[42], Yaml::Scalar(true));
     /// # }
     /// ```
-    pub fn get<I: Index>(&self, index: I) -> Option<&Value> {
+    pub fn get<I: Index>(&self, index: I) -> Option<&Yaml> {
         index.index_into(self)
     }
 
-    /// Returns true if the `Value` is a Null. Returns false otherwise.
+    /// Returns true if the `Yaml` is a Null. Returns false otherwise.
     ///
-    /// For any Value on which `is_null` returns true, `as_null` is guaranteed
+    /// For any Yaml on which `is_null` returns true, `as_null` is guaranteed
     /// to return `Some(())`.
     ///
     /// ```rust
-    /// # use serde_yaml::Value;
-    /// let v: Value = serde_yaml::from_str("null").unwrap();
+    /// # use serde_yaml::Yaml;
+    /// let v: Yaml = serde_yaml::from_str("null").unwrap();
     /// assert!(v.is_null());
     /// ```
     ///
     /// ```rust
-    /// # use serde_yaml::Value;
-    /// let v: Value = serde_yaml::from_str("false").unwrap();
+    /// # use serde_yaml::Yaml;
+    /// let v: Yaml = serde_yaml::from_str("false").unwrap();
     /// assert!(!v.is_null());
     /// ```
     pub fn is_null(&self) -> bool {
-        if let Value::Null = *self {
+        if let Yaml::Scalar(None) = *self {
             true
         } else {
             false
         }
     }
 
-    /// If the `Value` is a Null, returns (). Returns None otherwise.
+    /// If the `Yaml` is a Null, returns (). Returns None otherwise.
     ///
     /// ```rust
-    /// # use serde_yaml::Value;
-    /// let v: Value = serde_yaml::from_str("null").unwrap();
+    /// # use serde_yaml::Yaml;
+    /// let v: Yaml = serde_yaml::from_str("null").unwrap();
     /// assert_eq!(v.as_null(), Some(()));
     /// ```
     ///
     /// ```rust
-    /// # use serde_yaml::Value;
-    /// let v: Value = serde_yaml::from_str("false").unwrap();
+    /// # use serde_yaml::Yaml;
+    /// let v: Yaml = serde_yaml::from_str("false").unwrap();
     /// assert_eq!(v.as_null(), None);
     /// ```
     pub fn as_null(&self) -> Option<()> {
         match *self {
-            Value::Null => Some(()),
+            Yaml::Scalar(None) => Some(()),
             _ => None,
         }
     }
 
-    /// Returns true if the `Value` is a Boolean. Returns false otherwise.
+    /// Returns true if the `Yaml` is a Boolean. Returns false otherwise.
     ///
-    /// For any Value on which `is_boolean` returns true, `as_bool` is
+    /// For any Yaml on which `is_boolean` returns true, `as_bool` is
     /// guaranteed to return the boolean value.
     ///
     /// ```rust
-    /// # use serde_yaml::Value;
-    /// let v: Value = serde_yaml::from_str("true").unwrap();
+    /// # use serde_yaml::Yaml;
+    /// let v: Yaml = serde_yaml::from_str("true").unwrap();
     /// assert!(v.is_bool());
     /// ```
     ///
     /// ```rust
-    /// # use serde_yaml::Value;
-    /// let v: Value = serde_yaml::from_str("42").unwrap();
+    /// # use serde_yaml::Yaml;
+    /// let v: Yaml = serde_yaml::from_str("42").unwrap();
     /// assert!(!v.is_bool());
     /// ```
     pub fn is_bool(&self) -> bool {
         self.as_bool().is_some()
     }
 
-    /// If the `Value` is a Boolean, returns the associated bool. Returns None
+    /// If the `Yaml` is a Boolean, returns the associated bool. Returns None
     /// otherwise.
     ///
     /// ```rust
-    /// # use serde_yaml::Value;
-    /// let v: Value = serde_yaml::from_str("true").unwrap();
+    /// # use serde_yaml::Yaml;
+    /// let v: Yaml = serde_yaml::from_str("true").unwrap();
     /// assert_eq!(v.as_bool(), Some(true));
     /// ```
     ///
     /// ```rust
-    /// # use serde_yaml::Value;
-    /// let v: Value = serde_yaml::from_str("42").unwrap();
+    /// # use serde_yaml::Yaml;
+    /// let v: Yaml = serde_yaml::from_str("42").unwrap();
     /// assert_eq!(v.as_bool(), None);
     /// ```
     pub fn as_bool(&self) -> Option<bool> {
         match *self {
-            Value::Bool(b) => Some(b),
+            Yaml::Scalar(b) => match b {
+                true | false => Some(b),
+                _ => None,
+            },
             _ => None,
         }
     }
 
-    /// Returns true if the `Value` is a Number. Returns false otherwise.
+    /// Returns true if the `Yaml` is a Number. Returns false otherwise.
     ///
     /// ```rust
-    /// # use serde_yaml::Value;
-    /// let v: Value = serde_yaml::from_str("5").unwrap();
+    /// # use serde_yaml::Yaml;
+    /// let v: Yaml = serde_yaml::from_str("5").unwrap();
     /// assert!(v.is_number());
     /// ```
     ///
     /// ```rust
-    /// # use serde_yaml::Value;
-    /// let v: Value = serde_yaml::from_str("true").unwrap();
+    /// # use serde_yaml::Yaml;
+    /// let v: Yaml = serde_yaml::from_str("true").unwrap();
     /// assert!(!v.is_number());
     /// ```
+    // XXX | REVIEW: What's the proper way to parse this?
     pub fn is_number(&self) -> bool {
         match *self {
-            Value::Number(_) => true,
+            Yaml::Scalar(_) => true,
             _ => false,
         }
     }
 
-    /// Returns true if the `Value` is an integer between `i64::MIN` and
+    /// Returns true if the `Yaml` is an integer between `i64::MIN` and
     /// `i64::MAX`.
     ///
-    /// For any Value on which `is_i64` returns true, `as_i64` is guaranteed to
+    /// For any Yaml on which `is_i64` returns true, `as_i64` is guaranteed to
     /// return the integer value.
     ///
     /// ```rust
-    /// # use serde_yaml::Value;
-    /// let v: Value = serde_yaml::from_str("1337").unwrap();
+    /// # use serde_yaml::Yaml;
+    /// let v: Yaml = serde_yaml::from_str("1337").unwrap();
     /// assert!(v.is_i64());
     /// ```
     ///
     /// ```rust
-    /// # use serde_yaml::Value;
-    /// let v: Value = serde_yaml::from_str("null").unwrap();
+    /// # use serde_yaml::Yaml;
+    /// let v: Yaml = serde_yaml::from_str("null").unwrap();
     /// assert!(!v.is_i64());
     /// ```
     pub fn is_i64(&self) -> bool {
         self.as_i64().is_some()
     }
 
-    /// If the `Value` is an integer, represent it as i64 if possible. Returns
+    /// If the `Yaml` is an integer, represent it as i64 if possible. Returns
     /// None otherwise.
     ///
     /// ```rust
-    /// # use serde_yaml::Value;
-    /// let v: Value = serde_yaml::from_str("1337").unwrap();
+    /// # use serde_yaml::Yaml;
+    /// let v: Yaml = serde_yaml::from_str("1337").unwrap();
     /// assert_eq!(v.as_i64(), Some(1337));
     /// ```
     ///
     /// ```rust
-    /// # use serde_yaml::Value;
-    /// let v: Value = serde_yaml::from_str("false").unwrap();
+    /// # use serde_yaml::Yaml;
+    /// let v: Yaml = serde_yaml::from_str("false").unwrap();
     /// assert_eq!(v.as_i64(), None);
     /// ```
     pub fn as_i64(&self) -> Option<i64> {
         match *self {
-            Value::Number(ref n) => n.as_i64(),
+            Yaml::Number(ref n) => n.as_i64(),
             _ => None,
         }
     }
 
-    /// Returns true if the `Value` is an integer between `u64::MIN` and
+    /// Returns true if the `Yaml` is an integer between `u64::MIN` and
     /// `u64::MAX`.
     ///
-    /// For any Value on which `is_u64` returns true, `as_u64` is guaranteed to
+    /// For any Yaml on which `is_u64` returns true, `as_u64` is guaranteed to
     /// return the integer value.
     ///
     /// ```rust
-    /// # use serde_yaml::Value;
-    /// let v: Value = serde_yaml::from_str("1337").unwrap();
+    /// # use serde_yaml::Yaml;
+    /// let v: Yaml = serde_yaml::from_str("1337").unwrap();
     /// assert!(v.is_u64());
     /// ```
     ///
     /// ```rust
-    /// # use serde_yaml::Value;
-    /// let v: Value = serde_yaml::from_str("null").unwrap();
+    /// # use serde_yaml::Yaml;
+    /// let v: Yaml = serde_yaml::from_str("null").unwrap();
     /// assert!(!v.is_u64());
     /// ```
     pub fn is_u64(&self) -> bool {
         self.as_u64().is_some()
     }
 
-    /// If the `Value` is an integer, represent it as u64 if possible. Returns
+    /// If the `Yaml` is an integer, represent it as u64 if possible. Returns
     /// None otherwise.
     ///
     /// ```rust
-    /// # use serde_yaml::Value;
-    /// let v: Value = serde_yaml::from_str("1337").unwrap();
+    /// # use serde_yaml::Yaml;
+    /// let v: Yaml = serde_yaml::from_str("1337").unwrap();
     /// assert_eq!(v.as_u64(), Some(1337));
     /// ```
     ///
     /// ```rust
-    /// # use serde_yaml::Value;
-    /// let v: Value = serde_yaml::from_str("false").unwrap();
+    /// # use serde_yaml::Yaml;
+    /// let v: Yaml = serde_yaml::from_str("false").unwrap();
     /// assert_eq!(v.as_u64(), None);
     /// ```
     pub fn as_u64(&self) -> Option<u64> {
         match *self {
-            Value::Number(ref n) => n.as_u64(),
+            Yaml::Number(ref n) => n.as_u64(),
             _ => None,
         }
     }
 
-    /// Returns true if the `Value` is a number that can be represented by f64.
+    /// Returns true if the `Yaml` is a number that can be represented by f64.
     ///
-    /// For any Value on which `is_f64` returns true, `as_f64` is guaranteed to
+    /// For any Yaml on which `is_f64` returns true, `as_f64` is guaranteed to
     /// return the floating point value.
     ///
     /// Currently this function returns true if and only if both `is_i64` and
     /// `is_u64` return false but this is not a guarantee in the future.
     ///
     /// ```rust
-    /// # use serde_yaml::Value;
-    /// let v: Value = serde_yaml::from_str("256.01").unwrap();
+    /// # use serde_yaml::Yaml;
+    /// let v: Yaml = serde_yaml::from_str("256.01").unwrap();
     /// assert!(v.is_f64());
     /// ```
     ///
     /// ```rust
-    /// # use serde_yaml::Value;
-    /// let v: Value = serde_yaml::from_str("true").unwrap();
+    /// # use serde_yaml::Yaml;
+    /// let v: Yaml = serde_yaml::from_str("true").unwrap();
     /// assert!(!v.is_f64());
     /// ```
     pub fn is_f64(&self) -> bool {
         match *self {
-            Value::Number(ref n) => n.is_f64(),
+            Yaml::Number(ref n) => n.is_f64(),
             _ => false,
         }
     }
 
-    /// If the `Value` is a number, represent it as f64 if possible. Returns
+    /// If the `Yaml` is a number, represent it as f64 if possible. Returns
     /// None otherwise.
     ///
     /// ```rust
-    /// # use serde_yaml::Value;
-    /// let v: Value = serde_yaml::from_str("13.37").unwrap();
+    /// # use serde_yaml::Yaml;
+    /// let v: Yaml = serde_yaml::from_str("13.37").unwrap();
     /// assert_eq!(v.as_f64(), Some(13.37));
     /// ```
     ///
     /// ```rust
-    /// # use serde_yaml::Value;
-    /// let v: Value = serde_yaml::from_str("false").unwrap();
+    /// # use serde_yaml::Yaml;
+    /// let v: Yaml = serde_yaml::from_str("false").unwrap();
     /// assert_eq!(v.as_f64(), None);
     /// ```
     pub fn as_f64(&self) -> Option<f64> {
         match *self {
-            Value::Number(ref i) => i.as_f64(),
+            Yaml::Number(ref i) => i.as_f64(),
             _ => None,
         }
     }
 
-    /// Returns true if the `Value` is a String. Returns false otherwise.
+    /// Returns true if the `Yaml` is a String. Returns false otherwise.
     ///
-    /// For any Value on which `is_string` returns true, `as_str` is guaranteed
+    /// For any Yaml on which `is_string` returns true, `as_str` is guaranteed
     /// to return the string slice.
     ///
     /// ```rust
-    /// # use serde_yaml::Value;
-    /// let v: Value = serde_yaml::from_str("'lorem ipsum'").unwrap();
+    /// # use serde_yaml::Yaml;
+    /// let v: Yaml = serde_yaml::from_str("'lorem ipsum'").unwrap();
     /// assert!(v.is_string());
     /// ```
     ///
     /// ```rust
-    /// # use serde_yaml::Value;
-    /// let v: Value = serde_yaml::from_str("42").unwrap();
+    /// # use serde_yaml::Yaml;
+    /// let v: Yaml = serde_yaml::from_str("42").unwrap();
     /// assert!(!v.is_string());
     /// ```
     pub fn is_string(&self) -> bool {
         self.as_str().is_some()
     }
 
-    /// If the `Value` is a String, returns the associated str. Returns None
+    /// If the `Yaml` is a String, returns the associated str. Returns None
     /// otherwise.
     ///
     /// ```rust
-    /// # use serde_yaml::Value;
-    /// let v: Value = serde_yaml::from_str("'lorem ipsum'").unwrap();
+    /// # use serde_yaml::Yaml;
+    /// let v: Yaml = serde_yaml::from_str("'lorem ipsum'").unwrap();
     /// assert_eq!(v.as_str(), Some("lorem ipsum"));
     /// ```
     ///
     /// ```rust
-    /// # use serde_yaml::Value;
-    /// let v: Value = serde_yaml::from_str("false").unwrap();
+    /// # use serde_yaml::Yaml;
+    /// let v: Yaml = serde_yaml::from_str("false").unwrap();
     /// assert_eq!(v.as_str(), None);
     /// ```
     pub fn as_str(&self) -> Option<&str> {
         match *self {
-            Value::String(ref s) => Some(s),
+            Yaml::Scalar(ref s) => Some(s),
             _ => None,
         }
     }
 
-    /// Returns true if the `Value` is a sequence. Returns false otherwise.
+    /// Returns true if the `Yaml` is a sequence. Returns false otherwise.
     ///
     /// ```rust
-    /// # use serde_yaml::Value;
-    /// let v: Value = serde_yaml::from_str("[1, 2, 3]").unwrap();
+    /// # use serde_yaml::Yaml;
+    /// let v: Yaml = serde_yaml::from_str("[1, 2, 3]").unwrap();
     /// assert!(v.is_sequence());
     /// ```
     ///
     /// ```rust
-    /// # use serde_yaml::Value;
-    /// let v: Value = serde_yaml::from_str("true").unwrap();
+    /// # use serde_yaml::Yaml;
+    /// let v: Yaml = serde_yaml::from_str("true").unwrap();
     /// assert!(!v.is_sequence());
     /// ```
     pub fn is_sequence(&self) -> bool {
         self.as_sequence().is_some()
     }
 
-    /// If the `Value` is a sequence, return a reference to it if possible.
+    /// If the `Yaml` is a sequence, return a reference to it if possible.
     /// Returns None otherwise.
     ///
     /// ```rust
-    /// # use serde_yaml::{Value, Number};
-    /// let v: Value = serde_yaml::from_str("[1, 2]").unwrap();
-    /// assert_eq!(v.as_sequence(), Some(&vec![Value::Number(Number::from(1)), Value::Number(Number::from(2))]));
+    /// # use serde_yaml::{Yaml, Number};
+    /// let v: Yaml = serde_yaml::from_str("[1, 2]").unwrap();
+    /// assert_eq!(v.as_sequence(), Some(&vec![Yaml::Scalar(Number::from(1)), Yaml::Number(Number::from(2))]));
     /// ```
     ///
     /// ```rust
-    /// # use serde_yaml::Value;
-    /// let v: Value = serde_yaml::from_str("false").unwrap();
+    /// # use serde_yaml::Yaml;
+    /// let v: Yaml = serde_yaml::from_str("false").unwrap();
     /// assert_eq!(v.as_sequence(), None);
     /// ```
-    pub fn as_sequence(&self) -> Option<&Sequence> {
+    pub fn as_sequence(&self) -> Option<&Yaml> {
         match *self {
-            Value::Sequence(ref seq) => Some(seq),
+            Yaml::Sequence(ref seq) => Some(seq),
             _ => None,
         }
     }
 
-    /// If the `Value` is a sequence, return a mutable reference to it if
+    /// If the `Yaml` is a sequence, return a mutable reference to it if
     /// possible. Returns None otherwise.
     ///
     /// ```rust
-    /// # use serde_yaml::{Value, Number};
-    /// let mut v: Value = serde_yaml::from_str("[1]").unwrap();
+    /// # use serde_yaml::{Yaml, Number};
+    /// let mut v: Yaml = serde_yaml::from_str("[1]").unwrap();
     /// let s = v.as_sequence_mut().unwrap();
-    /// s.push(Value::Number(Number::from(2)));
-    /// assert_eq!(s, &vec![Value::Number(Number::from(1)), Value::Number(Number::from(2))]);
+    /// s.push(Yaml::Scalar(Number::from(2)));
+    /// assert_eq!(s, &vec![Yaml::Number(Number::from(1)), Yaml::Number(Number::from(2))]);
     /// ```
     ///
     /// ```rust
-    /// # use serde_yaml::Value;
-    /// let mut v: Value = serde_yaml::from_str("false").unwrap();
+    /// # use serde_yaml::Yaml;
+    /// let mut v: Yaml = serde_yaml::from_str("false").unwrap();
     /// assert_eq!(v.as_sequence_mut(), None);
     /// ```
-    pub fn as_sequence_mut(&mut self) -> Option<&mut Sequence> {
+    pub fn as_sequence_mut(&mut self) -> Option<&mut Yaml> {
         match *self {
-            Value::Sequence(ref mut seq) => Some(seq),
+            Yaml::Sequence(ref mut seq) => Some(seq),
             _ => None,
         }
     }
 
-    /// Returns true if the `Value` is a mapping. Returns false otherwise.
+    /// Returns true if the `Yaml` is a mapping. Returns false otherwise.
     ///
     /// ```rust
-    /// # use serde_yaml::Value;
-    /// let v: Value = serde_yaml::from_str("a: 42").unwrap();
+    /// # use serde_yaml::Yaml;
+    /// let v: Yaml = serde_yaml::from_str("a: 42").unwrap();
     /// assert!(v.is_mapping());
     /// ```
     ///
     /// ```rust
-    /// # use serde_yaml::Value;
-    /// let v: Value = serde_yaml::from_str("true").unwrap();
+    /// # use serde_yaml::Yaml;
+    /// let v: Yaml = serde_yaml::from_str("true").unwrap();
     /// assert!(!v.is_mapping());
     /// ```
     pub fn is_mapping(&self) -> bool {
         self.as_mapping().is_some()
     }
 
-    /// If the `Value` is a mapping, return a reference to it if possible.
+    /// If the `Yaml` is a mapping, return a reference to it if possible.
     /// Returns None otherwise.
     ///
     /// ```rust
-    /// # use serde_yaml::{Value, Mapping, Number};
-    /// let v: Value = serde_yaml::from_str("a: 42").unwrap();
+    /// # use serde_yaml::{Yaml, Mapping, Number};
+    /// let v: Yaml = serde_yaml::from_str("a: 42").unwrap();
     ///
     /// let mut expected = Mapping::new();
-    /// expected.insert(Value::String("a".into()),Value::Number(Number::from(42)));
+    /// expected.insert(Yaml::String("a".into()),Yaml::Number(Number::from(42)));
     ///
     /// assert_eq!(v.as_mapping(), Some(&expected));
     /// ```
     ///
     /// ```rust
-    /// # use serde_yaml::Value;
-    /// let v: Value = serde_yaml::from_str("false").unwrap();
+    /// # use serde_yaml::Yaml;
+    /// let v: Yaml = serde_yaml::from_str("false").unwrap();
     /// assert_eq!(v.as_mapping(), None);
     /// ```
     pub fn as_mapping(&self) -> Option<&Mapping> {
         match *self {
-            Value::Mapping(ref map) => Some(map),
+            Yaml::Mapping(ref map) => Some(map),
             _ => None,
         }
     }
 
-    /// If the `Value` is a mapping, return a reference to it if possible.
+    /// If the `Yaml` is a mapping, return a reference to it if possible.
     /// Returns None otherwise.
     ///
     /// ```rust
-    /// # use serde_yaml::{Value, Mapping, Number};
-    /// let mut v: Value = serde_yaml::from_str("a: 42").unwrap();
+    /// # use serde_yaml::{Yaml, Mapping, Number};
+    /// let mut v: Yaml = serde_yaml::from_str("a: 42").unwrap();
     /// let m = v.as_mapping_mut().unwrap();
-    /// m.insert(Value::String("b".into()),Value::Number(Number::from(21)));
+    /// m.insert(Yaml::String("b".into()),Yaml::Number(Number::from(21)));
     ///
     /// let mut expected = Mapping::new();
-    /// expected.insert(Value::String("a".into()),Value::Number(Number::from(42)));
-    /// expected.insert(Value::String("b".into()),Value::Number(Number::from(21)));
+    /// expected.insert(Yaml::String("a".into()),Yaml::Number(Number::from(42)));
+    /// expected.insert(Yaml::String("b".into()),Yaml::Number(Number::from(21)));
     ///
     /// assert_eq!(m, &expected);
     /// ```
     ///
     /// ```rust
-    /// # use serde_yaml::{Value, Mapping};
-    /// let mut v: Value = serde_yaml::from_str("false").unwrap();
+    /// # use serde_yaml::{Yaml, Mapping};
+    /// let mut v: Yaml = serde_yaml::from_str("false").unwrap();
     /// assert_eq!(v.as_mapping_mut(), None);
     /// ```
     pub fn as_mapping_mut(&mut self) -> Option<&mut Mapping> {
         match *self {
-            Value::Mapping(ref mut map) => Some(map),
+            Yaml::Mapping(ref mut map) => Some(map),
             _ => None,
         }
     }
 }
-
-fn yaml_to_value(yaml: Yaml) -> Value {
+// TODO: Reimplement!
+// REVIEW: Is this now meant to be entry?
+fn yaml_to_value(yaml: Yaml) -> Yaml {
     match yaml {
         Yaml::Real(f) => {
             if f == ".inf" {
-                Value::Number(f64::INFINITY.into())
+                Yaml::Number(f64::INFINITY.into())
             } else if f == "-.inf" {
-                Value::Number(f64::NEG_INFINITY.into())
+                Yaml::Number(f64::NEG_INFINITY.into())
             } else if f == ".nan" {
-                Value::Number(f64::NAN.into())
+                Yaml::Number(f64::NAN.into())
             } else if let Ok(n) = u64::from_str(&f) {
-                Value::Number(n.into())
+                Yaml::Number(n.into())
             } else if let Ok(n) = i64::from_str(&f) {
-                Value::Number(n.into())
+                Yaml::Number(n.into())
             } else if let Ok(n) = f64::from_str(&f) {
-                Value::Number(n.into())
+                Yaml::Number(n.into())
             } else {
-                Value::String(f)
+                Yaml::String(f)
             }
         }
-        Yaml::Integer(i) => Value::Number(i.into()),
-        Yaml::String(s) => Value::String(s),
-        Yaml::Boolean(b) => Value::Bool(b),
-        Yaml::Array(sequence) => Value::Sequence(sequence.into_iter().map(yaml_to_value).collect()),
-        Yaml::Hash(hash) => Value::Mapping(
+        Yaml::Integer(i) => Yaml::Number(i.into()),
+        Yaml::String(s) => Yaml::String(s),
+        Yaml::Boolean(b) => Yaml::Bool(b),
+        Yaml::Array(sequence) => Yaml::Sequence(sequence.into_iter().map(yaml_to_value).collect()),
+        Yaml::Hash(hash) => Yaml::Mapping(
             hash.into_iter()
                 .map(|(k, v)| (yaml_to_value(k), yaml_to_value(v)))
                 .collect(),
         ),
         Yaml::Alias(_) => panic!("alias unsupported"),
-        Yaml::Null => Value::Null,
-        Yaml::BadValue => panic!("bad value"),
+        Yaml::Null => Yaml::Null,
+        Yaml::BadYaml => panic!("bad value"),
     }
 }
 
-impl Eq for Value {}
+impl<'a> Eq for Yaml<'a> {}
 
-impl Hash for Value {
+impl<'a> Hash for Yaml<'a> {
     fn hash<H: Hasher>(&self, state: &mut H) {
         match *self {
-            Value::Null => 0.hash(state),
-            Value::Bool(b) => (1, b).hash(state),
-            Value::Number(ref i) => (2, i).hash(state),
-            Value::String(ref s) => (3, s).hash(state),
-            Value::Sequence(ref seq) => (4, seq).hash(state),
-            Value::Mapping(ref map) => (5, map).hash(state),
+            Yaml::Scalar(s) => (0, s).hash(state),
+            Yaml::Sequence(ref seq) => (4, seq).hash(state),
+            Yaml::Mapping(ref map) => (5, map).hash(state),
         }
     }
 }

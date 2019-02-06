@@ -19,8 +19,6 @@
 //! # Examples
 //!
 //! ```rust
-//! extern crate serde_yaml;
-//!
 //! use std::collections::BTreeMap;
 //!
 //! // You have some type.
@@ -44,8 +42,6 @@
 //!
 //! ```rust
 //! #[macro_use] extern crate serde_derive;
-//! extern crate serde_yaml;
-//!
 //! #[derive(Debug, PartialEq, Serialize, Deserialize)]
 //! struct Point { x: f64, y: f64 }
 //!
@@ -92,7 +88,6 @@ extern crate dtoa;
 extern crate linked_hash_map;
 #[macro_use]
 extern crate serde;
-extern crate yaml_rust;
 
 pub use self::de::{from_reader, from_slice, from_str};
 pub use self::error::{Error, Location, Result};

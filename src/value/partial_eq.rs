@@ -1,99 +1,99 @@
-use super::Value;
+use value::Yaml;
 
-impl PartialEq for Value {
-    fn eq(&self, other: &Value) -> bool {
+impl<'a> PartialEq for Yaml<'a> {
+    fn eq(&self, other: &Yaml) -> bool {
         match (self, other) {
-            (&Value::Null, &Value::Null) => true,
-            (&Value::Bool(a), &Value::Bool(b)) => a == b,
-            (&Value::Number(ref a), &Value::Number(ref b)) => a == b,
-            (&Value::String(ref a), &Value::String(ref b)) => a == b,
-            (&Value::Sequence(ref a), &Value::Sequence(ref b)) => a == b,
-            (&Value::Mapping(ref a), &Value::Mapping(ref b)) => a == b,
+            (&Yaml::Null, &Yaml::Null) => true,
+            (&Yaml::Bool(a), &Yaml::Bool(b)) => a == b,
+            (&Yaml::Number(ref a), &Yaml::Number(ref b)) => a == b,
+            (&Yaml::String(ref a), &Yaml::String(ref b)) => a == b,
+            (&Yaml::Sequence(ref a), &Yaml::Sequence(ref b)) => a == b,
+            (&Yaml::Mapping(ref a), &Yaml::Mapping(ref b)) => a == b,
             _ => false,
         }
     }
 }
 
-impl PartialEq<str> for Value {
+impl PartialEq<str> for Yaml {
     /// Compare `str` with YAML value
     ///
     /// # Examples
     ///
     /// ```rust
-    /// # use serde_yaml::Value;
-    /// assert!(Value::String("lorem".into()) == *"lorem");
+    /// # use serde_yaml::Yaml;
+    /// assert!(Yaml::Scalar("lorem".into()) == *"lorem");
     /// ```
     fn eq(&self, other: &str) -> bool {
         self.as_str().map_or(false, |s| s == other)
     }
 }
 
-impl<'a> PartialEq<&'a str> for Value {
+impl<'a> PartialEq<&'a str> for Yaml {
     /// Compare `&str` with YAML value
     ///
     /// # Examples
     ///
     /// ```rust
-    /// # use serde_yaml::Value;
-    /// assert!(Value::String("lorem".into()) == "lorem");
+    /// # use serde_yaml::Yaml;
+    /// assert!(Yaml::Scalar("lorem".into()) == "lorem");
     /// ```
     fn eq(&self, other: &&str) -> bool {
         self.as_str().map_or(false, |s| s == *other)
     }
 }
 
-impl PartialEq<Value> for str {
+impl PartialEq<Yaml> for str {
     /// Compare YAML value with `str`
     ///
     /// # Examples
     ///
     /// ```rust
-    /// # use serde_yaml::Value;
-    /// assert!(*"lorem" == Value::String("lorem".into()));
+    /// # use serde_yaml::Yaml;
+    /// assert!(*"lorem" == Yaml::Scalar("lorem".into()));
     /// ```
-    fn eq(&self, other: &Value) -> bool {
+    fn eq(&self, other: &Yaml) -> bool {
         other.as_str().map_or(false, |s| s == self)
     }
 }
 
-impl<'a> PartialEq<Value> for &'a str {
+impl<'a> PartialEq<Yaml> for &'a str {
     /// Compare `&str` with YAML value
     ///
     /// # Examples
     ///
     /// ```rust
-    /// # use serde_yaml::Value;
-    /// assert!("lorem" == Value::String("lorem".into()));
+    /// # use serde_yaml::Yaml;
+    /// assert!("lorem" == Yaml::Scalar("lorem".into()));
     /// ```
-    fn eq(&self, other: &Value) -> bool {
+    fn eq(&self, other: &Yaml) -> bool {
         other.as_str().map_or(false, |s| s == *self)
     }
 }
 
-impl PartialEq<String> for Value {
+impl PartialEq<String> for Yaml {
     /// Compare YAML value with String
     ///
     /// # Examples
     ///
     /// ```rust
-    /// # use serde_yaml::Value;
-    /// assert!(Value::String("lorem".into()) == "lorem".to_string());
+    /// # use serde_yaml::Yaml;
+    /// assert!(Yaml::Scalar("lorem".into()) == "lorem".to_string());
     /// ```
     fn eq(&self, other: &String) -> bool {
         self.as_str().map_or(false, |s| s == other)
     }
 }
 
-impl PartialEq<Value> for String {
+impl PartialEq<Yaml> for String {
     /// Compare `String` with YAML value
     ///
     /// # Examples
     ///
     /// ```rust
-    /// # use serde_yaml::Value;
-    /// assert!("lorem".to_string() == Value::String("lorem".into()));
+    /// # use serde_yaml::Yaml;
+    /// assert!("lorem".to_string() == Yaml::Scalar("lorem".into()));
     /// ```
-    fn eq(&self, other: &Value) -> bool {
+    fn eq(&self, other: &Yaml) -> bool {
         other.as_str().map_or(false, |s| s == self)
     }
 }
@@ -101,25 +101,25 @@ impl PartialEq<Value> for String {
 macro_rules! partialeq_numeric {
     ($([$($ty:ty)*], $conversion:ident, $base:ty)*) => {
         $($(
-            impl PartialEq<$ty> for Value {
+            impl PartialEq<$ty> for Yaml {
                 fn eq(&self, other: &$ty) -> bool {
                     self.$conversion().map_or(false, |i| i == (*other as $base))
                 }
             }
 
-            impl PartialEq<Value> for $ty {
-                fn eq(&self, other: &Value) -> bool {
+            impl PartialEq<Yaml> for $ty {
+                fn eq(&self, other: &Yaml) -> bool {
                     other.$conversion().map_or(false, |i| i == (*self as $base))
                 }
             }
 
-            impl<'a> PartialEq<$ty> for &'a Value {
+            impl<'a> PartialEq<$ty> for &'a Yaml {
                 fn eq(&self, other: &$ty) -> bool {
                     self.$conversion().map_or(false, |i| i == (*other as $base))
                 }
             }
 
-            impl<'a> PartialEq<$ty> for &'a mut Value {
+            impl<'a> PartialEq<$ty> for &'a mut Yaml {
                 fn eq(&self, other: &$ty) -> bool {
                     self.$conversion().map_or(false, |i| i == (*other as $base))
                 }

@@ -16,9 +16,6 @@ use std::fmt;
 use std::io;
 use std::str;
 
-use yaml_rust::parser::{Event as YamlEvent, MarkedEventReceiver, Parser};
-use yaml_rust::scanner::{Marker, TScalarStyle, TokenType};
-
 use serde::de::IgnoredAny as Ignore;
 use serde::de::{
     self, Deserialize, DeserializeOwned, DeserializeSeed, Expected, IntoDeserializer, Unexpected,
@@ -648,7 +645,8 @@ impl<'a> Deserializer<'a> {
             Event::Alias(mut pos) => self.jump(&mut pos)?.deserialize_scalar(visitor),
             Event::Scalar(ref v, style, ref tag) => visit_scalar(v, style, tag, visitor),
             ref other => Err(invalid_type(other, &visitor)),
-        }.map_err(|err| private::fix_marker(err, marker, self.path))
+        }
+        .map_err(|err| private::fix_marker(err, marker, self.path))
     }
 }
 
@@ -784,7 +782,8 @@ impl<'de, 'a, 'r> de::Deserializer<'de> for &'r mut Deserializer<'a> {
             Event::Scalar(ref v, _, _) => visitor.visit_str(v),
             Event::Alias(mut pos) => self.jump(&mut pos)?.deserialize_str(visitor),
             ref other => Err(invalid_type(other, &visitor)),
-        }.map_err(|err: Error| private::fix_marker(err, marker, self.path))
+        }
+        .map_err(|err: Error| private::fix_marker(err, marker, self.path))
     }
 
     fn deserialize_string<V>(self, visitor: V) -> Result<V::Value>
@@ -878,7 +877,8 @@ impl<'de, 'a, 'r> de::Deserializer<'de> for &'r mut Deserializer<'a> {
             Event::Alias(mut pos) => self.jump(&mut pos)?.deserialize_seq(visitor),
             Event::SequenceStart => self.visit_sequence(visitor),
             ref other => Err(invalid_type(other, &visitor)),
-        }.map_err(|err| private::fix_marker(err, marker, self.path))
+        }
+        .map_err(|err| private::fix_marker(err, marker, self.path))
     }
 
     fn deserialize_tuple<V>(self, _len: usize, visitor: V) -> Result<V::Value>
@@ -909,7 +909,8 @@ impl<'de, 'a, 'r> de::Deserializer<'de> for &'r mut Deserializer<'a> {
             Event::Alias(mut pos) => self.jump(&mut pos)?.deserialize_map(visitor),
             Event::MappingStart => self.visit_mapping(visitor),
             ref other => Err(invalid_type(other, &visitor)),
-        }.map_err(|err| private::fix_marker(err, marker, self.path))
+        }
+        .map_err(|err| private::fix_marker(err, marker, self.path))
     }
 
     fn deserialize_struct<V>(
@@ -929,7 +930,8 @@ impl<'de, 'a, 'r> de::Deserializer<'de> for &'r mut Deserializer<'a> {
             Event::SequenceStart => self.visit_sequence(visitor),
             Event::MappingStart => self.visit_mapping(visitor),
             ref other => Err(invalid_type(other, &visitor)),
-        }.map_err(|err| private::fix_marker(err, marker, self.path))
+        }
+        .map_err(|err| private::fix_marker(err, marker, self.path))
     }
 
     /// Parses an enum as a single key:value pair where the key identifies the
@@ -964,7 +966,7 @@ impl<'de, 'a, 'r> de::Deserializer<'de> for &'r mut Deserializer<'a> {
                     }
                 }
                 visitor.visit_enum(UnitVariantAccess { de: self })
-            },
+            }
             Event::MappingStart => {
                 *self.pos += 1;
                 let value = visitor.visit_enum(EnumAccess {
@@ -1011,9 +1013,9 @@ impl<'de, 'a, 'r> de::Deserializer<'de> for &'r mut Deserializer<'a> {
 /// type.
 ///
 /// YAML currently does not support zero-copy deserialization.
-pub fn from_str<T>(s: &str) -> Result<T>
+pub fn from_str<'a, T>(s: &'a str) -> Result<T>
 where
-    T: DeserializeOwned,
+    T: de::Deserialize<'a>,
 {
     let mut parser = Parser::new(s.chars());
     let mut loader = Loader {
@@ -1054,7 +1056,7 @@ where
 pub fn from_reader<R, T>(mut rdr: R) -> Result<T>
 where
     R: io::Read,
-    T: DeserializeOwned,
+    T: de::DeserializeOwned,
 {
     let mut bytes = Vec::new();
     rdr.read_to_end(&mut bytes).map_err(private::error_io)?;
@@ -1073,9 +1075,9 @@ where
 /// type.
 ///
 /// YAML currently does not support zero-copy deserialization.
-pub fn from_slice<T>(v: &[u8]) -> Result<T>
+pub fn from_slice<'a, T>(v: &'a [u8]) -> Result<T>
 where
-    T: DeserializeOwned,
+    T: de::Deserialize<'a>,
 {
     let s = str::from_utf8(v).map_err(private::error_str_utf8)?;
     from_str(s)

@@ -22,9 +22,9 @@ use std::fmt::Debug;
 
 use serde_yaml::Value;
 
-fn test_de<T>(yaml: &str, expected: &T)
+fn test_de<'a, T>(yaml: &'a str, expected: &'a T)
 where
-    T: serde::de::DeserializeOwned + PartialEq + Debug,
+    T: serde::de::Deserialize<'a> + PartialEq + Debug,
 {
     let deserialized: T = serde_yaml::from_str(yaml).unwrap();
     assert_eq!(*expected, deserialized);
@@ -178,7 +178,7 @@ fn test_enum_tag() {
         "
         ---
         a: !A foo
-        b: !B bar"
+        b: !B bar",
     );
     let expected = Data {
         a: E::A("foo".into()),
